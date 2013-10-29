@@ -48,8 +48,8 @@ class U1Driver:
     request.add_header('Authorization', 'Basic %s' % base64.b64encode('%s:%s' % (self.email, self.passwd)))
     try:
       response = urllib2.urlopen(request)
-    except urllib2.HTTPError, exc:
-      if exc.code == 401: # Unauthorized
+    except urllib2.HTTPError as httpe:
+      if httpe.code == 401: # Unauthorized
         raise AuthenticationFailure("Error 401: Bad email address or password")
       else:
         raise
@@ -68,6 +68,10 @@ class U1Driver:
     """Asks the user for his U1 credentials."""
     self.email = raw_input("Your Ubuntu One email: ")
     self.passwd = getpass.getpass("The Ubuntu One password for " + self.email + ": ")
+
+  def credentials_from_email_and_password(self):
+    self.prompt_user_credentials()
+    return self.oauth_get_access_token()    
     
   def credentials_from_file(self, credsfile):
     """Extracts the OAuth credentials from file. If it fails, asks user if he wants to input his credentials.
@@ -79,20 +83,35 @@ class U1Driver:
       # if file doesn't exist
       response = raw_input("Credentials file is unreadable or doesn't exist.\nWould you like to input your U1 credentials instead (will attempt storing the credentials in " + U1Driver.CREDS_FILE + ") ? [Yn] ")
       if response == '' or response.upper() == 'Y':
-        self.prompt_user_credentials()
-        jsoncreds = self.oauth_get_access_token()
+        jsoncreds = self.credentials_from_email_and_password()
+      else:
+        raise AuthenticationFailure("Cannot open credentials file (" + credsfile + ")")
+    except ValueError:
+      response = raw_input("Credentials file contents corrupted.\nWould you like to input your U1 credentials instead (will attempt storing the credentials in " + U1Driver.CREDS_FILE + ") ? [Yn] ")
+      if response == '' or response.upper() == 'Y':
+        jsoncreds = self.credentials_from_email_and_password()
       else:
         raise AuthenticationFailure("Cannot open credentials file (" + credsfile + ")")
     return jsoncreds
-    
+
   def login(self, prompt, creds_file=CREDS_FILE):
     """Log in method using OAuth signed requests"""
     if prompt:
-      self.email, self.passwd = self.prompt_user_credentials()
-      credentials = self.oauth_get_access_token()
+      credentials = self.credentials_from_email_and_password()
     else:
       credentials = self.credentials_from_file(creds_file)
-    self.authenticate(credentials)
+    try:
+      self.authenticate(credentials)
+    except urllib2.HTTPError as httpe:
+      if httpe.code == 403:
+        rep = raw_input("Error 403: your credentials may have been revoked. Regenerate it using your email/password ? [Yn] ")
+        if rep == '' or rep.upper() == 'Y':
+          self.prompt_user_credentials()
+          credentials = self.oauth_get_access_token()
+        else:
+          raise AuthenticationFailure("Error 403: Forbidden (Invalid or revoked credentials)")
+      else:
+        raise
     jsondata = json.dumps(credentials)
     try:
       with open(creds_file, 'wb') as f:
@@ -114,7 +133,27 @@ class U1Driver:
 
   def list_files(self):
     pass
+  
+  def quit(self):
+    pass
 
+  def interactive(self):
+    cmds = { "quit": self.quit,
+             "list": self.list_files,
+             "get": self.get,
+             "put": self.put,
+             "delete": self.delete
+      }
+    while True:
+      command = raw_input("U1Driver>>> ")
+      words = command.split()
+      try:
+        if command != '':
+          cmds[words[0]]() if words[0] != "get" and words[0] != "put" else cmds[words[0]](words[1])
+      except KeyError:
+        print "Unknown command:", words[0]
+      except IndexError:
+        print "This command expects an argument (a file name)."
 def main():
   driver = U1Driver()
 
@@ -129,6 +168,7 @@ def main():
     print "Successfully logged in, but errors occurred (" + aw.what + ")"
   else:
     print "Successfully logged in"
+    driver.interactive()
     
 if __name__ == "__main__":
   main()
