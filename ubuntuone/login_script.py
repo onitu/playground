@@ -1,16 +1,21 @@
 #!/usr/bin/python
 
-import argparse, base64, getpass, oauth2, platform, urllib, urllib2
+import argparse, base64, getpass, json, oauth2, platform, urllib, urllib2
 
 class AuthenticationFailure(Exception):
   """The provided email address and password were incorrect."""
   def __init__(self, what):
     self.what = "Authentication failure: " + what
 
+class AuthenticationWarning(Exception):
+  """For non-fatal errors during the authentication process."""
+  def __init__(self, what):
+    self.what = "Authentication warning: " + what
+
+
 class U1Driver:
   BASE_API_PATH = "/api/file_storage/v1"
-  CREDENTIALS = '.credentials'
-
+  CREDS_FILE = '.credentials'
   
   def __init__(self, resource_host="https://edge.one.ubuntu.com", content_host="https://files.one.ubuntu.com"):
     self.email = ''
@@ -18,7 +23,8 @@ class U1Driver:
     self.resource_host = resource_host
     self.content_host = content_host
 
-  def sign_request(url):
+  def oauth_sign_request(self, url):
+    """Signs any request using OAuth. Mandatory before any request of access upon OAuth-protected data"""
     oauth_request = oauth2.Request.from_consumer_and_token(self.consumer, self.token, 'GET', url)
     oauth_request.sign_request(oauth2.SignatureMethod_PLAINTEXT(), self.consumer, self.token)
     request = urllib2.Request(url)
@@ -26,15 +32,15 @@ class U1Driver:
       request.add_header(header, value)
     return request
 
-  def oauth_credentials(self, data):
-    consumer = oauth2.Consumer(data['consumer_key'], data['consumer_secret'])
-    token = oauth2.Token(data['token'], data['token_secret'])
-    return consumer, token
-    
-  def authenticate(self):
+  def make_oauth_credentials(self, jsoncreds):
+    """Creates the OAuth-related classes for credentials (used for every signed request)"""
+    self.consumer = oauth2.Consumer(jsoncreds['consumer_key'], jsoncreds['consumer_secret'])
+    self.token = oauth2.Token(jsoncreds['token'], jsoncreds['token_secret'])
+
+  def oauth_get_access_token(self):
+    """Aquire an OAuth access token for the given user credentials."""    
     #get hostname
     description = 'Ubuntu One @ %s' % platform.node()
-    """Aquire an OAuth access token for the given user."""
     # Issue a new access token for the user.
     request = urllib2.Request('https://login.ubuntu.com/api/1.0/authentications?' + 
                               urllib.urlencode({'ws.op': 'authenticate', 'token_name': description}))
@@ -44,22 +50,55 @@ class U1Driver:
       response = urllib2.urlopen(request)
     except urllib2.HTTPError, exc:
       if exc.code == 401: # Unauthorized
-        raise AuthenticationFailure("Bad email address or password")
+        raise AuthenticationFailure("Error 401: Bad email address or password")
       else:
         raise
-    data = json.load(response)
-    self.consumer, self.token = oauth_credentials(data)
-    # Tell Ubuntu One about the new token.
-    get_tokens_url = ('https://one.ubuntu.com/oauth/sso-finished-so-get-tokens/')
-    request = sign_request(self.consumer, self.token, get_tokens_url)
-    response = urllib2.urlopen(request)
-    print response.headers
-    print response.read()
-    print 'Success'
-    return data
+    credentials = json.load(response)
+    return credentials
 
-  def login(self):
-    pass
+  def authenticate(self, credentials):
+    """Makes first signed request using new OAuth credentials"""
+    self.make_oauth_credentials(credentials)
+    # Tell Ubuntu One about the new OAuth token.
+    get_tokens_url = ('https://one.ubuntu.com/oauth/sso-finished-so-get-tokens/')
+    request = self.oauth_sign_request(get_tokens_url)
+    response = urllib2.urlopen(request)
+
+  def prompt_user_credentials(self):
+    """Asks the user for his U1 credentials."""
+    self.email = raw_input("Your Ubuntu One email: ")
+    self.passwd = getpass.getpass("The Ubuntu One password for " + self.email + ": ")
+    
+  def credentials_from_file(self, credsfile):
+    """Extracts the OAuth credentials from file. If it fails, asks user if he wants to input his credentials.
+    Attempts to store it in given file name."""
+    try:
+      with open(credsfile) as f:
+        jsoncreds = json.loads(f.read())
+    except IOError as e:
+      # if file doesn't exist
+      response = raw_input("Credentials file is unreadable or doesn't exist.\nWould you like to input your U1 credentials instead (will attempt storing the credentials in " + U1Driver.CREDS_FILE + ") ? [Yn] ")
+      if response == '' or response.upper() == 'Y':
+        self.prompt_user_credentials()
+        jsoncreds = self.oauth_get_access_token()
+      else:
+        raise AuthenticationFailure("Cannot open credentials file (" + credsfile + ")")
+    return jsoncreds
+    
+  def login(self, prompt, creds_file=CREDS_FILE):
+    """Log in method using OAuth signed requests"""
+    if prompt:
+      self.email, self.passwd = self.prompt_user_credentials()
+      credentials = self.oauth_get_access_token()
+    else:
+      credentials = self.credentials_from_file(creds_file)
+    self.authenticate(credentials)
+    jsondata = json.dumps(credentials)
+    try:
+      with open(creds_file, 'wb') as f:
+        f.write(jsondata)
+    except IOError:
+      raise AuthenticationWarning("Could not save credentials to " + creds_file + " file")
 
   def logout(self):
     pass
@@ -82,17 +121,14 @@ def main():
   parser = argparse.ArgumentParser(description="Test Onitu Driver for Ubuntu One", epilog="2013 Onitu")
   parser.add_argument('-p', action='store_true', default=False, dest='prompt', help='Prompts user identification')
   args = parser.parse_args()
-  if args.prompt:
-    driver.email = raw_input("Ubuntu One email: ")
-    driver.passwd = getpass.getpass("Ubuntu One Password for " + driver.email + ": ")
-    print driver.email, driver.passwd
-    try:
-      driver.authenticate()
-    except AuthenticationFailure as af:
-      print af.what
-    else:
-      print "Successfully authenticated"
-
-
+  try:
+    driver.login(args.prompt)
+  except AuthenticationFailure as af:
+    print af.what
+  except AuthenticationWarning as aw:
+    print "Successfully logged in, but errors occurred (" + aw.what + ")"
+  else:
+    print "Successfully logged in"
+    
 if __name__ == "__main__":
   main()
