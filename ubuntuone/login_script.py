@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-import argparse, base64, getpass, json, oauth2, platform, urllib, urllib2
+import argparse, base64, getpass, json, oauth2, platform, requests, urllib2
+from requests import Request
 
 class AuthenticationFailure(Exception):
   """The provided email address and password were incorrect."""
@@ -21,17 +22,19 @@ class U1Driver:
   def __init__(self, resource_host="https://edge.one.ubuntu.com", content_host="https://files.one.ubuntu.com"):
     self.email = ''
     self.passwd = ''
+    self.session = requests.Session()
     self.resource_host = resource_host
     self.content_host = content_host
 
-  def oauth_sign_request(self, url):
+  def oauth_signed_request(self, req):
     """Signs any request using OAuth. Mandatory before any request of access upon OAuth-protected data"""
-    oauth_request = oauth2.Request.from_consumer_and_token(self.consumer, self.token, 'GET', url)
+    oauth_request = oauth2.Request.from_consumer_and_token(self.consumer, self.token, req.method, req.url)
     oauth_request.sign_request(oauth2.SignatureMethod_PLAINTEXT(), self.consumer, self.token)
-    request = urllib2.Request(url)
-    for header, value in oauth_request.to_header().items():
-      request.add_header(header, value)
-    return request
+    for header,value in oauth_request.to_header().items():
+      req.headers[header] = value
+    rep = self.session.send(req.prepare())
+    rep.raise_for_status()
+    return rep
 
   def oauth_make_credentials(self, jsoncreds):
     """Creates the OAuth-related classes for credentials (used for every signed request)"""
@@ -39,31 +42,27 @@ class U1Driver:
     self.token = oauth2.Token(jsoncreds['token'], jsoncreds['token_secret'])
 
   def oauth_get_access_token(self):
-    """Aquire an OAuth access token for the given user credentials."""    
+    """Acquire an OAuth access token for the given user credentials."""
     #get hostname
-    description = 'Ubuntu One @ %s' % platform.node()
+    description = 'Ubuntu One @ {}'.format(platform.node())
     # Issue a new access token for the user.
-    request = urllib2.Request('https://login.ubuntu.com/api/1.0/authentications?' + 
-                              urllib.urlencode({'ws.op': 'authenticate', 'token_name': description}))
-    request.add_header('Accept', 'application/json')
-    request.add_header('Authorization', 'Basic %s' % base64.b64encode('%s:%s' % (self.email, self.passwd)))
-    try:
-      response = urllib2.urlopen(request)
-    except urllib2.HTTPError as httpe:
-      if httpe.code == 401: # Unauthorized
-        raise AuthenticationFailure("Error 401: Bad email address or password")
-      else:
-        raise # Unhandled error
-    credentials = json.load(response)
+    params = {'ws.op': 'authenticate',
+              'token_name': description}
+    headers = {'Accept': 'application/json',
+               'Authorization': 'Basic {}'.format(base64.b64encode('{}:{}'.format(self.email, self.passwd)))
+               }
+    rep = requests.get('https://login.ubuntu.com/api/1.0/authentications', params=params, headers=headers)
+    rep.raise_for_status()
+    credentials = rep.json()
     return credentials
 
   def authenticate(self, credentials):
     """Makes first signed request using new OAuth credentials"""
     self.oauth_make_credentials(credentials)
     # Tell Ubuntu One about the new OAuth token.
-    get_tokens_url = ('https://one.ubuntu.com/oauth/sso-finished-so-get-tokens/')
-    request = self.oauth_sign_request(get_tokens_url)
-    response = urllib2.urlopen(request)
+    req = Request('GET', 'https://one.ubuntu.com/oauth/sso-finished-so-get-tokens/')
+    rep = self.oauth_signed_request(req)
+    
 
   def prompt_user_credentials(self):
     """Asks the user for his U1 credentials."""
@@ -101,16 +100,14 @@ class U1Driver:
     else:
       credentials = self.credentials_from_file(creds_file)
     try:
-      self.authenticate(credentials)
-    except urllib2.HTTPError as httpe:
-      if httpe.code == 403:
-        rep = raw_input("Error 403: your credentials may have been revoked. Regenerate it using your email/password ? [Yn] ")
-        if rep == '' or rep.upper() == 'Y':
-          self.prompt_user_credentials()
-          credentials = self.oauth_get_access_token()
-        else:
-          raise AuthenticationFailure("Error 403: Forbidden (Invalid or revoked credentials)")
-      else:
+      rep = self.authenticate(credentials)
+    except requests.exceptions.HTTPError as httpe: # credentials revoked
+      print httpe
+      rep = raw_input("Your credentials may have been revoked. Regenerate it using your email/password ? [Yn] ")
+      if rep == '' or rep.upper() == 'Y':
+        self.prompt_user_credentials()
+        credentials = self.oauth_get_access_token()
+      else: # unhandled error
         raise
     jsondata = json.dumps(credentials)
     try:
@@ -128,25 +125,25 @@ class U1Driver:
     url = U1Driver.BASE_API_PATH 
     url += '/~/' if not args[0].startswith('/~/') else ''
     url += urllib2.quote(args[0])
-    request = self.oauth_sign_request(url)
+    req = Request('GET', url)
     print 'Sending request to', url
     try:
-        rep = urllib2.urlopen(request)
-    except urllib2.HTTPError as httpe:
-        print "Error %i finding: %s" % (httpe.code, url)
+      rep = self.oauth_signed_request(req)
+    except requests.exceptions.HTTPError as httpe:
+        print httpe, "upon access to", url
         return
-    metadatas = json.loads(rep.read())
-    url = U1Driver.BASE_FILES_PATH + urllib.quote(metadatas.get('content_path'), safe="/")
-    request = self.oauth_sign_request(url)
+    metadatas = rep.json()
+    url = U1Driver.BASE_FILES_PATH + urllib2.quote(metadatas.get('content_path'), safe="/")
+    req = Request('GET', url)
     if bytes_range != '':
-      request.add_header('Range', 'bytes=' + bytes_range)
-    print 'Downloading contents of ', url
+      req.headers['Range'] = 'bytes=' + bytes_range
+    print 'Downloading contents of', url
     try:
-        rep = urllib2.urlopen(request)
-    except urllib2.HTTPError as httpe:
-        print "Error %i finding: %s" % (httpe.code, url)
-        return
-    content = rep.read()
+      rep = self.oauth_signed_request(req)
+    except requests.exceptions.HTTPError as httpe:
+      print httpe, "while downloading", url
+      return
+    content = rep.content
     try:
       local_filename = args[1]
     except IndexError:
@@ -156,7 +153,7 @@ class U1Driver:
       with open(local_filename, 'wb') as local_file:
         local_file.write(content)
     except IOError:
-      print "Unable to write to file %s" % local_filename
+      print "Unable to write to file", local_filename
     print 'Done'
 
   def put(self, *args):
@@ -168,14 +165,14 @@ class U1Driver:
   def list_files(self, volume='', tabs_nbr=0):
     """Lists files on the Ubuntu One cloud.
     Will print the contents of each Ubuntu One volume of the user through a recursive call"""
-    url = U1Driver.BASE_API_PATH + urllib2.quote(volume) + '?include_children=true'
-    request = self.oauth_sign_request(url)
+    url = U1Driver.BASE_API_PATH + urllib2.quote(volume)
+    request = requests.Request('GET', url, params={'include_children': 'true'})
     try:
-        response = urllib2.urlopen(request)
-    except urllib2.HTTPError:
-        print "Error finding: %s" % url
+      rep = self.oauth_signed_request(request)
+    except requests.exceptions.HTTPError:
+        print "Error finding:", url
         return
-    basepaths = json.loads(response.read())
+    basepaths = rep.json()
     if volume == '': # base call: list every subsequent directory (recursively)
       self.list_files(basepaths['root_node_path'])
       for user_volume in basepaths['user_node_paths']:
@@ -221,10 +218,13 @@ def main():
   except AuthenticationFailure as af:
     print af.what
   except AuthenticationWarning as aw:
-    print "Successfully logged in, but errors occurred (" + aw.what + ")"
+    print "Successfully logged in, but errors occurred (", aw.what, ")"
   else:
     print "Successfully logged in"
-    driver.interactive()
+    try:
+      driver.interactive()
+    except Exception as exc: # any unhandled error
+      print exc
     
 if __name__ == "__main__":
   main()
