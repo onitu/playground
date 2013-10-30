@@ -14,7 +14,7 @@ class AuthenticationWarning(Exception):
 
 
 class U1Driver:
-  BASE_API_PATH = "/api/file_storage/v1"
+  BASE_API_PATH = "https://one.ubuntu.com/api/file_storage/v1"
   CREDS_FILE = '.credentials'
   
   def __init__(self, resource_host="https://edge.one.ubuntu.com", content_host="https://files.one.ubuntu.com"):
@@ -122,18 +122,40 @@ class U1Driver:
   def logout(self):
     pass
   
-  def get(self, file_path):
+  def get(self, file_path, *args):
     pass
 
-  def put(self, file_path):
+  def put(self, file_path, *args):
     pass
 
-  def delete(self, file_path):
+  def delete(self, file_path, *args):
     pass
 
-  def list_files(self):
-    pass
-  
+  def list_files(self, volume='', tabs_nbr=0):
+    """Lists files on the Ubuntu One cloud.
+    Will print the contents of each Ubuntu One volume of the user through a recursive call"""
+    url = U1Driver.BASE_API_PATH + urllib2.quote(volume) + '?include_children=true'
+    request = self.oauth_sign_request(url)
+    try:
+        response = urllib2.urlopen(request)
+    except urllib2.HTTPError:
+        print "Error finding: %s" % url
+        return
+    basepaths = json.loads(response.read())
+    print basepaths
+    if volume == '':
+      self.list_files(basepaths['root_node_path'])
+      for user_volume in basepaths['user_node_paths']:
+        self.list_files(user_volume)
+    else:
+      print ('\t'*tabs_nbr) + basepaths.get('resource_path').split('/')[-1] + '/'
+      if basepaths.get('has_children') == True:
+        for child in basepaths.get('children'):
+          if child['kind'] == 'directory':
+            self.list_files(child['resource_path'], tabs_nbr+1)
+          elif child['kind'] == 'file':
+            print ('\t'*(tabs_nbr+1)) + child[u'path'].split('/')[-1]
+            
   def quit(self):
     pass
 
@@ -149,11 +171,12 @@ class U1Driver:
       words = command.split()
       try:
         if command != '':
-          cmds[words[0]]() if words[0] != "get" and words[0] != "put" else cmds[words[0]](words[1])
+          cmds[words[0]](words[1]) if words[0] != 'list' else self.list_files("/~/Ubuntu One/")
       except KeyError:
         print "Unknown command:", words[0]
       except IndexError:
-        print "This command expects an argument (a file name)."
+        print "This command expects arguments (at least a file/volume name)."
+
 def main():
   driver = U1Driver()
 
