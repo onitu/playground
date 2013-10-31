@@ -181,7 +181,6 @@ class U1Driver:
     req = Request('PUT', url,
                   headers={'Content-Length': str(len(bytedata)),
                            'Content-Type': mimetypes.guess_type(args[0])[0] or 'application/octet-stream', # if mimetypes failed to guess
-                           'Range': 'bytes=0-1',
                            },
                   data=bytedata
                   )
