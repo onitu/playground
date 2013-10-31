@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import argparse, base64, getpass, json, oauth2, platform, requests, urllib2
+import argparse, base64, getpass, json, mimetypes, oauth2, platform, requests, urllib2
 from requests import Request
 
 class AuthenticationFailure(Exception):
@@ -156,8 +156,41 @@ class U1Driver:
       print "Unable to write to file", local_filename
     print 'Done'
 
-  def put(self, *args):
-    pass
+  def put(self, args, bytes_range=''):
+    """Uploads a file on the Ubuntu One cloud.
+    A two-step process: first notify the API about the creation of the file, then upload the actual content of the file to the Files domain"""
+    url = U1Driver.BASE_API_PATH
+    url += '/~/' if not args[0].startswith('/~/') else ''
+    url += urllib2.quote(args[1])
+    req = Request('PUT', url, data='{"kind":"file"}')
+    try:
+      rep = self.oauth_signed_request(req)
+    except requests.exceptions.HTTPError as httpe:
+      print "Error creating", url, ":", httpe
+      return
+    jsondata = rep.json()
+    print rep
+    print jsondata
+    try:
+      with open(args[0], 'rb') as local_file:
+        bytedata = bytearray(local_file.read())  
+    except IOError:
+      print 'Remote file was created, but local file', args[0], 'cannot be read'
+      return
+    url = U1Driver.BASE_FILES_PATH + urllib2.quote(jsondata.get('content_path'), safe="/~")
+    req = Request('PUT', url,
+                  headers={'Content-Length': str(len(bytedata)),
+                           'Content-Type': mimetypes.guess_type(args[0])[0] or 'application/octet-stream', # if mimetypes failed to guess
+                           'Range': 'bytes=0-1',
+                           },
+                  data=bytedata
+                  )
+    try:
+      rep = self.oauth_signed_request(req)
+    except requests.exceptions.HTTPError as httpe:
+      print "Error uploading to", url, ":", httpe
+      return
+    print 'Complete'
 
   def delete(self, file_path, *args):
     pass
@@ -221,10 +254,7 @@ def main():
     print "Successfully logged in, but errors occurred (", aw.what, ")"
   else:
     print "Successfully logged in"
-    try:
-      driver.interactive()
-    except Exception as exc: # any unhandled error
-      print exc
-    
+    driver.interactive()
+        
 if __name__ == "__main__":
   main()
