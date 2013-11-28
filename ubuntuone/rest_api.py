@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-import argparse, base64, getpass, json, mimetypes, oauth2, platform, requests, urllib2
+import argparse, base64, getpass, json, mimetypes, oauth2, os, platform, requests, urllib2
 from requests import Request
 
 class AuthenticationFailure(Exception):
@@ -171,24 +171,27 @@ class U1Driver:
     jsondata = rep.json()
     print rep
     print jsondata
+    url = U1Driver.BASE_FILES_PATH + urllib2.quote(jsondata.get('content_path'), safe="/~")
     try:
       with open(args[0], 'rb') as local_file:
-        bytedata = bytearray(local_file.read())  
-    except IOError:
+        filesize = os.path.getsize(args[0])
+        offset = already_sent = 0
+        while offset < filesize:
+          bytedata = bytearray(local_file.read(5))
+          already_sent += len(bytedata)
+          print 'test:', str(offset) + '-' + str(already_sent) + '/' + str(filesize)
+          req = Request('PUT', url, 
+                        headers={'Range': str(offset) + '-' + str(already_sent) + '/' + str(filesize),
+                                 'Content-Length': str(len(bytedata)),
+                                 'Content-Type': 'application/octet-stream', # if mimetypes failed to guess
+                                 },
+                        data=bytedata)
+          rep = self.oauth_signed_request(req)
+          offset += len(bytedata)
+    except IOError: # File error
       print 'Remote file was created, but local file', args[0], 'cannot be read'
-      return
-    url = U1Driver.BASE_FILES_PATH + urllib2.quote(jsondata.get('content_path'), safe="/~")
-    req = Request('PUT', url,
-                  headers={'Content-Length': str(len(bytedata)),
-                           'Content-Type': mimetypes.guess_type(args[0])[0] or 'application/octet-stream', # if mimetypes failed to guess
-                           },
-                  data=bytedata
-                  )
-    try:
-      rep = self.oauth_signed_request(req)
-    except requests.exceptions.HTTPError as httpe:
+    except requests.exceptions.HTTPError as httpe: # Network error
       print "Error uploading to", url, ":", httpe
-      return
     print 'Complete'
 
   def delete(self, file_path, *args):
