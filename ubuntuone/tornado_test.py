@@ -8,13 +8,14 @@ import U1Requests
 class U1Handler:
     FMT_MSG_SIZE = "!I" # In U1 protocol, size of a message is sent before the message itself. It is the format string to use to get that message size
     HOST, PORT = ("fs-1.one.ubuntu.com", 443) # The U1 server we're connecting to and the port
+    ROOT_VOLUME_PATH = u'~/Ubuntu One' # The standard root path 
 
     def __init__(self):
-        self.volumes = []
-        # TODO load the saved info about volumes here
+        self.free_bytes = 0
+        self.volumes = {}
+        # TODO load the saved info here
         self.msg_id = 1 # we are a client, we send odd requests, starting at 1
-        self.requests = {} # Dict of our pending requests. The message id is the key
-
+        self.requests = {} # Dict of our pending requests. The message id is the key        
 
     def connect(self):
         """Start of the tornado ioloop. Base of everything"""
@@ -28,9 +29,7 @@ class U1Handler:
 
     def send_request(self, req):
         """Function used to finalize a protobuf sending.
-        Sets the id of the protobuf and increment the class' msg_id.
-        Sets a callback in wait for the response."""
-        print 'sending req', req.req_id
+        Sends the actual message preceded by its length in bytes."""
         message = req.message.SerializeToString()
         # send the message length (according to protocol)
         msgLength = struct.pack(U1Handler.FMT_MSG_SIZE, len(message))
@@ -45,13 +44,23 @@ class U1Handler:
         if msg.id % 2 != 0: # Odd = it's a response to one of our requests
             try:
                 self.requests[msg.id].process(msg)
-            except KeyError: # should not happen
-                print 'Server Error', msg.id # TODO: what do we do ?
+            except KeyError: # should not happen because it always should be in response to one of our previous request
+                print 'Server error on message : {}'.format(msg) # TODO: what to do ?
                 self.io_loop.stop()
-            except RequestException as re: # The server didn't send the expected request
-                pass # TODO: don't know what to do by now. maybe send an ERROR message ?
-        else: # Even : unsolicited message from the server !
-            pass # TODO: nothing atm.
+            except U1Requests.RequestException as re: # The request couldn't handle the response
+                print 'Request exception: {}'.format(re)
+                self.io_loop.stop()
+            except Exception as e: # whatever happened
+                print 'Unhandled exception: {}'.format(e)
+                self.io_loop.stop()
+        else: # Even : it's an unsolicited message from the server
+            print 'unsolicited message id', msg.id, 'type', msg.type, 'msg:', msg
+            # call the function handling this kind of messages
+            handler = getattr(self, "handle_" + name, None)
+            if handler is not None:
+                result = handler(message)
+            else:
+                raise Exception("Cant handle message '{}' {}".format(U1Requests.msg_type(msg), str(message).replace("\n", " ")))
         self.receive_message() # wait for a new message
 
 
@@ -63,11 +72,6 @@ class U1Handler:
         self.process_message(data)
 
 
-    def request_finished(self, req_id):
-        """Function called by a request when it's finished, to delete itself of the requests dict."""
-        del self.requests[req_id]
-
-
     ### Data transfer functions
     @gen.coroutine
     def initialize_connection(self):
@@ -77,21 +81,69 @@ class U1Handler:
         greeting = yield gen.Task(self.stream.read_until, b"\r\n") # get the server greeting
         print greeting # whatever (we don't care about the greeting)
         self.send_request(U1Requests.AuthRequest(self)) # First mandatory step : OAuth authentication
-        self.send_request(U1Requests.ListVolumes(self)) # check the server's volumes list
+        self.send_request(U1Requests.ListVolumes(self, callback=self.update_volumes)) # check the server's volumes list
+
+    def update_volume_generation(self, vol_id, delta_end):
+        """Updates a volume generation."""
+        self.volumes[vol_id]['generation'] = delta_end.generation
+        
+
+    def update_volumes(self, list_volumes):
+        """Callback function called at initialization when the server's volumes listing is complete.
+        For each listed volume, will update the informations."""
+        volumes = list_volumes.volumes
+        for vol_id in volumes:
+            self.update_volume_info(volumes[vol_id], vol_id)
+        
+
+    def update_volume_info(self, vol_info, vol_id):
+        """Updates our info about a volume. If the given volume is unknown, creates a new entry.
+        If the current generation is greater than the one we know, ask a delta to know what has changed."""
+        # Retrieve the current generation we're aware of to know later if we are up-to-date.
+        try:
+            old_gen = self.volumes[vol_id]['generation']
+        except KeyError: # No such volume id -> create a New volume
+            self.volumes[vol_id] = {}
+            old_gen = -1 # special value for the GetDelta request to mean "delta from scratch".
+        # Path is special: root doesn't have a "suggested path" field, so we must deal with it.
+        # The root path has always been something specific. (TODO: check how it works on Windows)
+        if vol_info.type == protocol_pb2.Volumes.ROOT:
+            volume = vol_info.root
+            self.volumes[vol_id]['path'] = U1Handler.ROOT_VOLUME_PATH
+        elif vol_info.type == protocol_pb2.Volumes.UDF:
+            volume = vol_info.udf
+            self.volumes[vol_id]['path'] = volume.suggested_path
+        self.volumes[vol_id]['type'] = vol_info.type
+        self.volumes[vol_id]['node'] = volume.node
+        self.volumes[vol_id]['free_bytes'] = volume.free_bytes
+        if 'generation' not in self.volumes[vol_id] or self.volumes[vol_id]['generation'] < volume.generation:
+            # if the reported generation is further than the one we have : demand a delta
+            self.send_request(U1Requests.GetDelta(self,
+                                                  volume=vol_id,
+                                                  from_generation=old_gen,
+                                                  on_delta_info=self.update_file_info,
+                                                  on_delta_end=self.update_volume_generation))
 
 
-    def authenticate(self):
-        """First mandatory step of the U1 connection.
-        We create a authentication request by sending our OAuth credentials.
-        The server should respond with AUTH_AUTHENTICATED and ROOT commands."""
-        auth_request = U1Requests.AuthRequest(self)
-        self.send_request(auth_request)
+    def update_file_info(self, delta_info):
+        """Updates the information we have about a volume's file.
+        Called upon a DELTA_INFO to update ourselves according to the contents of the delta sent by the server.
+        Here, "file" means an U1 "node", so it can be a simple file or a directory."""        
+        file_info = delta_info.file_info
+
+        vol = file_info.share # share = volume in u1
+        node = file_info.node # the file uuid
+        if node not in self.volumes[vol] or delta_info.generation > self.volumes[vol][node]:
+            self.volumes[vol][node] = {field[0].name: field[1] for field in file_info.ListFields()}
 
 
-    def list_volumes(self):
-        """Ask the server about the current registered Ubuntu One volumes.
-        We need to check if there are new volumes that appeared since the last time."""
-        list_volumes
+    ### Handling functions of unsolicited events
+    def handle_PING(self):
+        """Function called upon a PING request from the server. Sends a PONG."""
+        pong = U1Requests.Pong(self)
+        self.send_request(pong)
+        pong.finish() # doesn't wait for a response, so explicitly delete it
+        
 
 handler = U1Handler()
 
