@@ -39,13 +39,15 @@ class U1Handler:
 
 
     def process_message(self, data):
+        """Function called when a message is received"""
         msg = protocol_pb2.Message()
         msg.ParseFromString(data)
+        # print 'Servent sent message id', msg.id, 'type', msg.type, 'msg:', msg
         if msg.id % 2 != 0: # Odd = it's a response to one of our requests
             try:
                 self.requests[msg.id].process(msg)
-            except KeyError: # should not happen because it always should be in response to one of our previous request
-                print 'Server error on message : {}'.format(msg) # TODO: what to do ?
+            except KeyError as ke: # should not happen because it always should be in response to one of our previous requests
+                print 'Server error on message : {} ({})'.format(msg, ke),  # TODO: what to do ?
                 self.io_loop.stop()
             except U1Requests.RequestException as re: # The request couldn't handle the response
                 print 'Request exception: {}'.format(re)
@@ -54,18 +56,20 @@ class U1Handler:
                 print 'Unhandled exception: {}'.format(e)
                 self.io_loop.stop()
         else: # Even : it's an unsolicited message from the server
-            print 'unsolicited message id', msg.id, 'type', msg.type, 'msg:', msg
             # call the function handling this kind of messages
-            handler = getattr(self, "handle_" + name, None)
+            req_name = U1Requests.msg_type(msg)
+            handler = getattr(self, "handle_" + req_name, None)
             if handler is not None:
-                result = handler(message)
-            else:
+                handler(msg)
+            else: # Not supposed to happen (obsolete protocol ?)
                 raise Exception("Cant handle message '{}' {}".format(U1Requests.msg_type(msg), str(message).replace("\n", " ")))
         self.receive_message() # wait for a new message
 
 
     @gen.coroutine
     def receive_message(self):
+        """Function used to receive a message. First reads the amount of data of the message (in bytes, as an unsigned integer),
+        then the message itself and passes it on to process_message."""
         msgLength = yield gen.Task(self.stream.read_bytes, struct.calcsize(U1Handler.FMT_MSG_SIZE))
         msgLength = struct.unpack(U1Handler.FMT_MSG_SIZE, msgLength)[0]
         data = yield gen.Task(self.stream.read_bytes, msgLength)
@@ -82,11 +86,19 @@ class U1Handler:
         print greeting # whatever (we don't care about the greeting)
         self.send_request(U1Requests.AuthRequest(self)) # First mandatory step : OAuth authentication
         self.send_request(U1Requests.ListVolumes(self, callback=self.update_volumes)) # check the server's volumes list
+        self.send_request(U1Requests.GetContent(self,
+                                                share='2867b9fd-5cac-4d01-9c72-be2f769b7429',
+                                                node='7a118492-d207-4ba3-aa69-76f8f93541eb',
+                                                hash='sha1:03f7495b51cc70b76872ed019d19dee1b73e89b6',
+                                                offset=1,
+                                                filename='test')) # check the server's volumes list
+        print 'Initialization complete, volumes list:'
+        print self.volumes
 
     def update_volume_generation(self, vol_id, delta_end):
         """Updates a volume generation."""
         self.volumes[vol_id]['generation'] = delta_end.generation
-        
+
 
     def update_volumes(self, list_volumes):
         """Callback function called at initialization when the server's volumes listing is complete.
@@ -94,7 +106,7 @@ class U1Handler:
         volumes = list_volumes.volumes
         for vol_id in volumes:
             self.update_volume_info(volumes[vol_id], vol_id)
-        
+
 
     def update_volume_info(self, vol_info, vol_id):
         """Updates our info about a volume. If the given volume is unknown, creates a new entry.
@@ -138,12 +150,13 @@ class U1Handler:
 
 
     ### Handling functions of unsolicited events
-    def handle_PING(self):
+    def handle_PING(self, msg):
         """Function called upon a PING request from the server. Sends a PONG."""
         pong = U1Requests.Pong(self)
         self.send_request(pong)
+        print 'Sent a PONG'
         pong.finish() # doesn't wait for a response, so explicitly delete it
-        
+
 
 handler = U1Handler()
 
