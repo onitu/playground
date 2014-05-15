@@ -21,6 +21,12 @@ class Escalator(object):
     def get(self, key):
         return self._request(protocol.GET, key)[0]
 
+    def get_default(self, key, default=None):
+        try:
+            return self._request(protocol.GET, key)[0]
+        except protocol.KeyNotFound:
+            return default
+
     def put(self, key, value):
         self._request(protocol.PUT, key, value)
 
