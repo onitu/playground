@@ -5,7 +5,8 @@ import protocol
 
 class Escalator(object):
 
-    def __init__(self, server='localhost', port=4224, protocol='tcp', addr=None):
+    def __init__(self, server='localhost', port=4224, protocol='tcp',
+                 addr=None):
         super(Escalator, self).__init__()
 
         self.context = zmq.Context()
@@ -29,6 +30,9 @@ class Escalator(object):
 
     def put(self, key, value):
         self._request(protocol.PUT, key, value)
+
+    def delete(self, key):
+        self._request(protocol.DELETE, key)
 
 if __name__ == '__main__':
     from multiprocessing.pool import ThreadPool

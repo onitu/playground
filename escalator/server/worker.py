@@ -18,7 +18,8 @@ class Worker(Thread):
 
         self.commands = {
             protocol.GET: self.get,
-            protocol.PUT: self.put
+            protocol.PUT: self.put,
+            protocol.DELETE: self.delete
         }
 
     def run(self):
@@ -49,4 +50,8 @@ class Worker(Thread):
 
     def put(self, key, value):
         self.db.put(key, value)
+        return protocol.format_response()
+
+    def delete(self, key):
+        self.db.delete(key)
         return protocol.format_response()

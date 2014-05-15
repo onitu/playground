@@ -1,15 +1,20 @@
 import msgpack
 
 _registered_commands = {}
+
+
 def command(name, value):
     _registered_commands[value] = name
     return value
 
+
 def get_command(value):
     return _registered_commands[value]
 
+
 GET = command('GET', b'\x01')
 PUT = command('PUT', b'\x02')
+DELETE = command('DELETE', b'\x03')
 
 
 class Status(type):
@@ -41,7 +46,8 @@ STATUS_CMD_NOT_FOUND = new_status('STATUS_CMD_NOT_FOUND', CommandNotFound)
 
 class InvalidArguments(TypeError):
     def __init__(self, cmd):
-        TypeError.__init__(self, 'Invalid arguments for command {}'.format(get_command(cmd)))
+        TypeError.__init__(self, 'Invalid arguments for command {}'.
+                           format(get_command(cmd)))
 STATUS_INVALID_ARGS = new_status('STATUS_INVALID_ARGS', InvalidArguments)
 
 
