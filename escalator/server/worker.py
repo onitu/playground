@@ -25,7 +25,13 @@ class Worker(Thread):
             protocol.EXISTS: self.exists,
             protocol.PUT: self.put,
             protocol.DELETE: self.delete,
-            protocol.RANGE: self.range
+            protocol.RANGE: self.range,
+            protocol.BATCH: self.batch
+        }
+
+        self.batch_commands = {
+            protocol.PUT: self.batch_put,
+            protocol.DELETE: self.batch_delete
         }
 
     def run(self):
@@ -34,14 +40,14 @@ class Worker(Thread):
 
         while True:
             cmd, args = protocol.extract_request(self.socket.recv())
-            resp = self.handle_cmd(cmd, args)
+            resp = self.handle_cmd(self.commands, cmd, args)
             if isinstance(resp, Multipart):
                 self.socket.send_multipart(resp)
             else:
-                self.socket.send(self.handle_cmd(cmd, args))
+                self.socket.send(resp)
 
-    def handle_cmd(self, cmd, args):
-        cb = self.commands.get(cmd)
+    def handle_cmd(self, commands, cmd, args):
+        cb = commands.get(cmd)
         if cb:
             try:
                 resp = cb(*args)
@@ -90,3 +96,17 @@ class Worker(Thread):
                                             reverse=reverse))
         values.insert(0, protocol.format_response())
         return values
+
+    def batch(self):
+        with self.db.write_batch() as wb:
+            while self.socket.get(zmq.RCVMORE):
+                cmd, args = protocol.extract_request(self.socket.recv())
+                args.insert(0, wb)
+                self.handle_cmd(self.batch_commands, cmd, args)
+        return protocol.format_response()
+
+    def batch_put(self, wb, key, value):
+        wb.put(key, value)
+
+    def batch_delete(self, wb, key):
+        wb.delete(key)

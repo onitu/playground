@@ -3,8 +3,34 @@ import zmq
 import protocol
 
 
-class Escalator(object):
+class WriteBatch(object):
+    def __init__(self, db):
+        self.db = db
+        self.requests = []
 
+    def write(self):
+        self.requests.insert(0, protocol.format_request(protocol.BATCH))
+        self.db.socket.send_multipart(self.requests)
+        protocol.extract_response(self.db.socket.recv())
+        self.requests = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.write()
+
+    def _request(self, *args):
+        self.requests.append(protocol.format_request(*args))
+
+    def put(self, key, value):
+        self._request(protocol.PUT, key, value)
+
+    def delete(self, key):
+        self._request(protocol.DELETE, key)
+
+
+class Escalator(object):
     def __init__(self, server='localhost', port=4224, protocol='tcp',
                  addr=None):
         super(Escalator, self).__init__()
@@ -55,6 +81,9 @@ class Escalator(object):
                                    include_start, include_stop,
                                    include_key, include_value,
                                    reverse)
+
+    def write_batch(self):
+        return WriteBatch(self)
 
 if __name__ == '__main__':
     from multiprocessing.pool import ThreadPool

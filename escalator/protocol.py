@@ -19,6 +19,7 @@ EXISTS = command('EXISTS', b'\x02')
 PUT = command('PUT', b'\x03')
 DELETE = command('DELETE', b'\x04')
 RANGE = command('RANGE', b'\x05')
+BATCH = command('BATCH', b'\x06')
 
 
 class Status(type):
