@@ -2,6 +2,8 @@ from threading import Thread
 
 import zmq
 
+import protocol
+
 
 class Worker(Thread):
 
@@ -15,8 +17,8 @@ class Worker(Thread):
         self.db = db
 
         self.commands = {
-            '1': self.get,
-            '2': self.put
+            protocol.GET: self.get,
+            protocol.PUT: self.put
         }
 
     def run(self):
@@ -24,31 +26,27 @@ class Worker(Thread):
         self.socket.connect(self.uri)
 
         while True:
-            cmd = self.socket.recv()
+            cmd, args = protocol.extract_request(self.socket.recv())
             cb = self.commands.get(cmd)
 
-            if not cb:
-                # send error
+            if cb:
+                try:
+                    resp = cb(*args)
+                except TypeError:
+                    print("invalid args")
+                    resp = protocol.format_response(cmd, status=protocol.STATUS_INVALID_ARGS)
+            else:
                 print("bad command")
-                self.socket.send(None)
-                return
-
-            resp = cb()
-
-            if self.socket.get(zmq.RCVMORE):
-                # send error
-                print("Too much data sent")
-                self.socket.send(None)
-                return
+                resp = protocol.format_response(cmd, status=protocol.STATUS_CMD_NOT_FOUND)
 
             self.socket.send(resp)
 
-    def get(self):
-        key = self.socket.recv()
-        return self.db.get(key)
+    def get(self, key):
+        value = self.db.get(key)
+        if value is None:
+            return protocol.format_response(key, status=protocol.STATUS_KEY_NOT_FOUND)
+        return protocol.format_response(value)
 
-    def put(self):
-        key = self.socket.recv()
-        value = self.socket.recv()
+    def put(self, key, value):
         self.db.put(key, value)
-        return '1'
+        return protocol.format_response()

@@ -1,5 +1,7 @@
 import zmq
 
+import protocol
+
 
 class Escalator(object):
 
@@ -10,15 +12,15 @@ class Escalator(object):
         self.socket = self.context.socket(zmq.REQ)
         self.socket.connect('tcp://127.0.0.1:4224')
 
-    def _send(self, *data):
-        self.socket.send_multipart(data)
-        return self.socket.recv()
+    def _request(self, *args):
+        self.socket.send(protocol.format_request(*args))
+        return protocol.extract_response(self.socket.recv())
 
     def get(self, key):
-        return self._send('1', key)
+        return self._request(protocol.GET, key)[0]
 
     def put(self, key, value):
-        return self._send('2', key, value)
+        self._request(protocol.PUT, key, value)
 
 if __name__ == '__main__':
     from multiprocessing.pool import ThreadPool
