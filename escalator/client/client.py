@@ -19,6 +19,14 @@ class Escalator(object):
         self.socket.send(protocol.format_request(*args))
         return protocol.extract_response(self.socket.recv())
 
+    def _request_multi(self, *args):
+        self.socket.send(protocol.format_request(*args))
+        protocol.extract_response(self.socket.recv())
+        l = []
+        while self.socket.get(zmq.RCVMORE):
+            l.append(protocol.unpack_msg(self.socket.recv()))
+        return l
+
     def get(self, key):
         return self._request(protocol.GET, key)[0]
 
@@ -36,6 +44,17 @@ class Escalator(object):
 
     def delete(self, key):
         self._request(protocol.DELETE, key)
+
+    def range(self,
+              prefix=None, start=None, stop=None,
+              include_start=True, include_stop=False,
+              include_key=True, include_value=True,
+              reverse=False):
+        return self._request_multi(protocol.RANGE,
+                                   prefix, start, stop,
+                                   include_start, include_stop,
+                                   include_key, include_value,
+                                   reverse)
 
 if __name__ == '__main__':
     from multiprocessing.pool import ThreadPool

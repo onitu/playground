@@ -18,6 +18,7 @@ GET = command('GET', b'\x01')
 EXISTS = command('EXISTS', b'\x02')
 PUT = command('PUT', b'\x03')
 DELETE = command('DELETE', b'\x04')
+RANGE = command('RANGE', b'\x05')
 
 
 class Status(type):
@@ -64,6 +65,10 @@ class Error(Exception):
     def __init__(self):
         Exception.__init__(self, 'An error occurred')
 STATUS_ERROR = new_status('STATUS_ERROR', Error)
+
+
+def pack_arg(arg):
+    return msgpack.packb(arg)
 
 
 def pack_msg(*args):
