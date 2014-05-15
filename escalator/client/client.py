@@ -4,12 +4,14 @@ import protocol
 
 
 class WriteBatch(object):
-    def __init__(self, db):
+    def __init__(self, db, transaction):
         self.db = db
+        self.transaction = transaction
         self.requests = []
 
     def write(self):
-        self.requests.insert(0, protocol.format_request(protocol.BATCH))
+        self.requests.insert(0, protocol.format_request(protocol.BATCH,
+                                                        self.transaction))
         self.db.socket.send_multipart(self.requests)
         protocol.extract_response(self.db.socket.recv())
         self.requests = []
@@ -18,7 +20,8 @@ class WriteBatch(object):
         return self
 
     def __exit__(self, type, value, traceback):
-        self.write()
+        if not self.transaction or not type:
+            self.write()
 
     def _request(self, *args):
         self.requests.append(protocol.format_request(*args))
@@ -82,8 +85,8 @@ class Escalator(object):
                                    include_key, include_value,
                                    reverse)
 
-    def write_batch(self):
-        return WriteBatch(self)
+    def write_batch(self, transaction=False):
+        return WriteBatch(self, transaction)
 
 if __name__ == '__main__':
     from multiprocessing.pool import ThreadPool

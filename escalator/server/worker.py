@@ -97,8 +97,8 @@ class Worker(Thread):
         values.insert(0, protocol.format_response())
         return values
 
-    def batch(self):
-        with self.db.write_batch() as wb:
+    def batch(self, transaction):
+        with self.db.write_batch(transaction=transaction) as wb:
             while self.socket.get(zmq.RCVMORE):
                 cmd, args = protocol.extract_request(self.socket.recv())
                 args.insert(0, wb)
