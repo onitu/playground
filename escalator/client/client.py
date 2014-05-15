@@ -12,7 +12,7 @@ class Escalator(object):
         self.socket = self.context.socket(zmq.REQ)
         if addr is None:
             addr = '{}://{}:{}'.format(protocol, server, port)
-        self.socket.connect(address)
+        self.socket.connect(addr)
 
     def _request(self, *args):
         self.socket.send(protocol.format_request(*args))
