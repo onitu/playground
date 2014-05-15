@@ -28,19 +28,20 @@ class Worker(Thread):
 
         while True:
             cmd, args = protocol.extract_request(self.socket.recv())
-            cb = self.commands.get(cmd)
+            self.socket.send(self.handle_cmd(cmd, args))
 
-            if cb:
-                try:
-                    resp = cb(*args)
-                except TypeError:
-                    print("invalid args")
-                    resp = protocol.format_response(cmd, status=protocol.STATUS_INVALID_ARGS)
-            else:
-                print("bad command")
-                resp = protocol.format_response(cmd, status=protocol.STATUS_CMD_NOT_FOUND)
-
-            self.socket.send(resp)
+    def handle_cmd(self, cmd, args):
+        cb = self.commands.get(cmd)
+        if cb:
+            try:
+                resp = cb(*args)
+            except TypeError:
+                print("invalid args")
+                resp = protocol.format_response(cmd, status=protocol.STATUS_INVALID_ARGS)
+        else:
+            print("bad command")
+            resp = protocol.format_response(cmd, status=protocol.STATUS_CMD_NOT_FOUND)
+        return resp
 
     def get(self, key):
         value = self.db.get(key)
