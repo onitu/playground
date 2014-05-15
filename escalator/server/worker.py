@@ -18,6 +18,7 @@ class Worker(Thread):
 
         self.commands = {
             protocol.GET: self.get,
+            protocol.EXISTS: self.exists,
             protocol.PUT: self.put,
             protocol.DELETE: self.delete
         }
@@ -48,6 +49,10 @@ class Worker(Thread):
         if value is None:
             return protocol.format_response(key, status=protocol.STATUS_KEY_NOT_FOUND)
         return protocol.format_response(value)
+
+    def exists(self, key):
+        value = self.db.get(key)
+        return protocol.format_response(value is not None)
 
     def put(self, key, value):
         self.db.put(key, value)

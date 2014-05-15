@@ -22,6 +22,9 @@ class Escalator(object):
     def get(self, key):
         return self._request(protocol.GET, key)[0]
 
+    def exists(self, key):
+        return self._request(protocol.EXISTS, key)[0]
+
     def get_default(self, key, default=None):
         try:
             return self._request(protocol.GET, key)[0]

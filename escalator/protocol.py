@@ -4,6 +4,8 @@ _registered_commands = {}
 
 
 def command(name, value):
+    if value in _registered_commands:
+        raise ValueError('Command {} already exists'.format(value))
     _registered_commands[value] = name
     return value
 
@@ -13,8 +15,9 @@ def get_command(value):
 
 
 GET = command('GET', b'\x01')
-PUT = command('PUT', b'\x02')
-DELETE = command('DELETE', b'\x03')
+EXISTS = command('EXISTS', b'\x02')
+PUT = command('PUT', b'\x03')
+DELETE = command('DELETE', b'\x04')
 
 
 class Status(type):
