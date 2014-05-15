@@ -1,59 +1,60 @@
 import msgpack
 
-GET = b'1'
-PUT = b'2'
+_registered_commands = {}
+def command(name, value):
+    _registered_commands[value] = name
+    return value
+
+def get_command(value):
+    return _registered_commands[value]
+
+GET = command('GET', b'\x01')
+PUT = command('PUT', b'\x02')
 
 
 class Status(type):
-    maxcode = 0
-    registered_status = {}
+    _registered_status = []
 
     def __new__(cls, name, bases, dct):
-        cls.maxcode += 1
-        dct['code'] = cls.maxcode
+        dct['code'] = len(cls._registered_status)
         c = super(Status, cls).__new__(cls, name, bases, dct)
-        cls.registered_status[c.code] = c
+        cls._registered_status.append(c)
         return c
 
     @classmethod
     def get(cls, code):
-        return cls.registered_status[code]
+        return cls._registered_status[code]
 
 
-def with_metaclass(metacls):
-    return metacls('Base', (object,), {})
+def new_status(name, exception):
+    return Status(name, (object,), {'exception': exception})
 
 
-class STATUS_OK(with_metaclass(Status)):
-    exception = None
+STATUS_OK = new_status('STATUS_OK', None)
 
 
-class STATUS_CMD_NOT_FOUND(with_metaclass(Status)):
-    class CommandNotFound(KeyError):
-        def __init__(self, cmd):
-            KeyError.__init__(self, 'No such command {}'.format(repr(cmd)))
-    exception = CommandNotFound
+class CommandNotFound(KeyError):
+    def __init__(self, cmd):
+        KeyError.__init__(self, 'No such command {}'.format(repr(cmd)))
+STATUS_CMD_NOT_FOUND = new_status('STATUS_CMD_NOT_FOUND', CommandNotFound)
 
 
-class STATUS_INVALID_ARGS(with_metaclass(Status)):
-    class InvalidArguments(TypeError):
-        def __init__(self, cmd):
-            TypeError.__init__(self, 'Invalid arguments for command {}'.format(repr(cmd)))
-    exception = InvalidArguments
+class InvalidArguments(TypeError):
+    def __init__(self, cmd):
+        TypeError.__init__(self, 'Invalid arguments for command {}'.format(get_command(cmd)))
+STATUS_INVALID_ARGS = new_status('STATUS_INVALID_ARGS', InvalidArguments)
 
 
-class STATUS_KEY_NOT_FOUND(with_metaclass(Status)):
-    class KeyNotFound(KeyError):
-        def __init__(self, key):
-            KeyError.__init__(self, 'Key {} not found in base'.format(repr(key)))
-    exception = KeyNotFound
+class KeyNotFound(KeyError):
+    def __init__(self, key):
+        KeyError.__init__(self, 'Key {} not found in base'.format(repr(key)))
+STATUS_KEY_NOT_FOUND = new_status('STATUS_KEY_NOT_FOUND', KeyNotFound)
 
 
-class STATUS_ERROR(with_metaclass(Status)):
-    class Error(Exception):
-        def __init__(self):
-            Exception.__init__(self, 'An error occurred')
-    exception = Error
+class Error(Exception):
+    def __init__(self):
+        Exception.__init__(self, 'An error occurred')
+STATUS_ERROR = new_status('STATUS_ERROR', Error)
 
 
 def pack_msg(*args):
