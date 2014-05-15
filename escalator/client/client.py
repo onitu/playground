@@ -5,12 +5,14 @@ import protocol
 
 class Escalator(object):
 
-    def __init__(self, *args, **kwargs):
-        super(Escalator, self).__init__(*args, **kwargs)
+    def __init__(self, server='localhost', port=4224, protocol='tcp', addr=None):
+        super(Escalator, self).__init__()
 
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
-        self.socket.connect('tcp://127.0.0.1:4224')
+        if addr is None:
+            addr = '{}://{}:{}'.format(protocol, server, port)
+        self.socket.connect(address)
 
     def _request(self, *args):
         self.socket.send(protocol.format_request(*args))
