@@ -39,7 +39,7 @@ class Worker(Thread):
         self.socket.connect(self.uri)
 
         while True:
-            cmd, args = protocol.extract_request(self.socket.recv())
+            cmd, uid, args = protocol.extract_request(self.socket.recv())
             resp = self.handle_cmd(self.commands, cmd, args)
             if isinstance(resp, Multipart):
                 self.socket.send_multipart(resp)
@@ -100,7 +100,7 @@ class Worker(Thread):
     def batch(self, transaction):
         with self.db.write_batch(transaction=transaction) as wb:
             while self.socket.get(zmq.RCVMORE):
-                cmd, args = protocol.extract_request(self.socket.recv())
+                cmd, _, args = protocol.extract_request(self.socket.recv())
                 args.insert(0, wb)
                 self.handle_cmd(self.batch_commands, cmd, args)
         return protocol.format_response()

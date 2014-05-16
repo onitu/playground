@@ -80,8 +80,8 @@ def unpack_msg(packed):
     return msgpack.unpackb(packed)
 
 
-def format_request(cmd, *args):
-    return pack_msg(cmd, args)
+def format_request(cmd, uid, *args):
+    return pack_msg(cmd, uid, args)
 
 
 def format_response(*args, **kwargs):
@@ -90,8 +90,8 @@ def format_response(*args, **kwargs):
 
 
 def extract_request(msg):
-    cmd, args = unpack_msg(msg)
-    return cmd, args
+    cmd, uid, args = unpack_msg(msg)
+    return cmd, uid, args
 
 
 def extract_response(msg):

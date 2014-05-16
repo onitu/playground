@@ -13,6 +13,7 @@ class WriteBatch(object):
 
     def write(self):
         self.requests.insert(0, protocol.format_request(protocol.BATCH,
+                                                        self.db.db_uid,
                                                         self.transaction))
         self.db.socket.send_multipart(self.requests)
         protocol.extract_response(self.db.socket.recv())
@@ -25,8 +26,8 @@ class WriteBatch(object):
         if not self.transaction or not type:
             self.write()
 
-    def _request(self, *args):
-        self.requests.append(protocol.format_request(*args))
+    def _request(self, cmd, *args):
+        self.requests.append(protocol.format_request(cmd, None, *args))
 
     def put(self, key, value):
         self._request(protocol.PUT, key, value)
@@ -39,6 +40,7 @@ class Escalator(object):
     def __init__(self, server='localhost', port=4224, protocol='tcp',
                  addr=None):
         super(Escalator, self).__init__()
+        self.db_uid = None
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
         self.lock = Lock()
@@ -46,14 +48,14 @@ class Escalator(object):
             addr = '{}://{}:{}'.format(protocol, server, port)
         self.socket.connect(addr)
 
-    def _request(self, *args):
+    def _request(self, cmd, *args):
         with self.lock:
-            self.socket.send(protocol.format_request(*args))
+            self.socket.send(protocol.format_request(cmd, self.db_uid, *args))
             return protocol.extract_response(self.socket.recv())
 
-    def _request_multi(self, *args):
+    def _request_multi(self, cmd, *args):
         with self.lock:
-            self.socket.send(protocol.format_request(*args))
+            self.socket.send(protocol.format_request(cmd, self.db_uid, *args))
             protocol.extract_response(self.socket.recv())
             l = []
             while self.socket.get(zmq.RCVMORE):
