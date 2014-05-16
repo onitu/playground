@@ -14,12 +14,14 @@ def get_command(value):
     return _registered_commands[value]
 
 
-GET = command('GET', b'\x01')
-EXISTS = command('EXISTS', b'\x02')
-PUT = command('PUT', b'\x03')
-DELETE = command('DELETE', b'\x04')
-RANGE = command('RANGE', b'\x05')
-BATCH = command('BATCH', b'\x06')
+CREATE = command('CREATE', b'\x01')
+CONNECT = command('CONNECT', b'\x02')
+GET = command('GET', b'\x03')
+EXISTS = command('EXISTS', b'\x04')
+PUT = command('PUT', b'\x05')
+DELETE = command('DELETE', b'\x06')
+RANGE = command('RANGE', b'\x07')
+BATCH = command('BATCH', b'\x08')
 
 
 class Status(type):
@@ -41,6 +43,24 @@ def new_status(name, exception):
 
 
 STATUS_OK = new_status('STATUS_OK', None)
+
+
+class DatabaseNotFound(KeyError):
+    def __init__(self, name):
+        KeyError.__init__(self, 'No database {} found'.format(repr(name)))
+STATUS_DB_NOT_FOUND = new_status('STATUS_DB_NOT_FOUND', DatabaseNotFound)
+
+
+class DatabaseError(Exception):
+    def __init__(self, name):
+        Exception.__init__(self, 'Can not open database {}'.format(repr(name)))
+STATUS_DB_ERROR = new_status('STATUS_DB_ERROR', DatabaseError)
+
+
+class NoDatabaseSelected(ValueError):
+    def __init__(self, cmd):
+        ValueError.__init__(self, 'No database is selected')
+STATUS_NO_DB = new_status('STATUS_NO_DB', NoDatabaseSelected)
 
 
 class CommandNotFound(KeyError):
