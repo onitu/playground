@@ -35,8 +35,8 @@ class Worker(Thread):
         }
 
         self.batch_commands = {
-            protocol.PUT: self.batch_put,
-            protocol.DELETE: self.batch_delete
+            protocol.PUT: self.put,
+            protocol.DELETE: self.delete
         }
 
     def run(self):
@@ -121,26 +121,20 @@ class Worker(Thread):
               include_key, include_value,
               reverse):
         values = Multipart(protocol.pack_arg(v) for v in
-                           self.db.iterator(prefix=prefix,
-                                            start=start,
-                                            stop=stop,
-                                            include_start=include_start,
-                                            include_stop=include_stop,
-                                            include_key=include_key,
-                                            include_value=include_value,
-                                            reverse=reverse))
+                           db.iterator(prefix=prefix,
+                                       start=start,
+                                       stop=stop,
+                                       include_start=include_start,
+                                       include_stop=include_stop,
+                                       include_key=include_key,
+                                       include_value=include_value,
+                                       reverse=reverse))
         values.insert(0, protocol.format_response())
         return values
 
     def batch(self, db, transaction):
-        with self.db.write_batch(transaction=transaction) as wb:
+        with db.write_batch(transaction=transaction) as wb:
             while self.socket.get(zmq.RCVMORE):
                 cmd, _, args = protocol.extract_request(self.socket.recv())
                 self.handle_cmd(wb, self.batch_commands, cmd, args)
         return protocol.format_response()
-
-    def batch_put(self, wb, key, value):
-        wb.put(key, value)
-
-    def batch_delete(self, wb, key):
-        wb.delete(key)
