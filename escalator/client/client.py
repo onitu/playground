@@ -1,3 +1,5 @@
+from threading import Lock
+
 import zmq
 
 import protocol
@@ -37,24 +39,26 @@ class Escalator(object):
     def __init__(self, server='localhost', port=4224, protocol='tcp',
                  addr=None):
         super(Escalator, self).__init__()
-
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REQ)
+        self.lock = Lock()
         if addr is None:
             addr = '{}://{}:{}'.format(protocol, server, port)
         self.socket.connect(addr)
 
     def _request(self, *args):
-        self.socket.send(protocol.format_request(*args))
-        return protocol.extract_response(self.socket.recv())
+        with self.lock:
+            self.socket.send(protocol.format_request(*args))
+            return protocol.extract_response(self.socket.recv())
 
     def _request_multi(self, *args):
-        self.socket.send(protocol.format_request(*args))
-        protocol.extract_response(self.socket.recv())
-        l = []
-        while self.socket.get(zmq.RCVMORE):
-            l.append(protocol.unpack_msg(self.socket.recv()))
-        return l
+        with self.lock:
+            self.socket.send(protocol.format_request(*args))
+            protocol.extract_response(self.socket.recv())
+            l = []
+            while self.socket.get(zmq.RCVMORE):
+                l.append(protocol.unpack_msg(self.socket.recv()))
+            return l
 
     def get(self, key):
         return self._request(protocol.GET, key)[0]
