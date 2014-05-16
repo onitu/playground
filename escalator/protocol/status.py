@@ -1,4 +1,4 @@
-import protocol
+from . import cmd as protocol_cmd
 
 
 class Status(type):
@@ -50,7 +50,7 @@ CMD_NOT_FOUND = new_status('CMD_NOT_FOUND', CommandNotFound)
 class InvalidArguments(TypeError):
     def __init__(self, cmd):
         TypeError.__init__(self, 'Invalid arguments for command {}'.
-                           format(protocol.cmd.get_command(cmd)))
+                           format(protocol_cmd.get_command(cmd)))
 INVALID_ARGS = new_status('INVALID_ARGS', InvalidArguments)
 
 
