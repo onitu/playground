@@ -21,6 +21,7 @@ workers = []
 
 for i in range(nb_workers):
     worker = Worker(databases, back_uri)
+    worker.daemon = True
     worker.start()
     workers.append(worker)
 
