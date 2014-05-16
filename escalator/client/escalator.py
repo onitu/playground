@@ -2,13 +2,13 @@ from threading import Lock
 
 import zmq
 
-import protocol
+from . import protocol
 from .batch import WriteBatch
 
 
 class Escalator(object):
     def __init__(self, db_name='default',
-                 server='localhost', port=4224, protocol='tcp', addr=None,
+                 server='localhost', port=4224, transport='tcp', addr=None,
                  create_db=False):
         super(Escalator, self).__init__()
         self.db_uid = None
@@ -16,55 +16,59 @@ class Escalator(object):
         self.socket = self.context.socket(zmq.REQ)
         self.lock = Lock()
         if addr is None:
-            addr = '{}://{}:{}'.format(protocol, server, port)
+            addr = '{}://{}:{}'.format(transport, server, port)
         self.socket.connect(addr)
         if db_name is not None:
             self.connect(db_name, create_db)
 
     def _request(self, cmd, *args):
         with self.lock:
-            self.socket.send(protocol.format_request(cmd, self.db_uid, *args))
-            return protocol.extract_response(self.socket.recv())
+            self.socket.send(protocol.msg.format_request(cmd,
+                                                         self.db_uid,
+                                                         *args))
+            return protocol.msg.extract_response(self.socket.recv())
 
     def _request_multi(self, cmd, *args):
         with self.lock:
-            self.socket.send(protocol.format_request(cmd, self.db_uid, *args))
-            protocol.extract_response(self.socket.recv())
+            self.socket.send(protocol.msg.format_request(cmd,
+                                                         self.db_uid,
+                                                         *args))
+            protocol.msg.extract_response(self.socket.recv())
             l = []
             while self.socket.get(zmq.RCVMORE):
-                l.append(protocol.unpack_msg(self.socket.recv()))
+                l.append(protocol.msg.unpack_msg(self.socket.recv()))
             return l
 
     def create(self, name):
-        self._request(protocol.CREATE, name)
+        self._request(protocol.cmd.CREATE, name)
 
     def connect(self, name, create=False):
-        self.db_uid = self._request(protocol.CONNECT, name, create)[0]
+        self.db_uid = self._request(protocol.cmd.CONNECT, name, create)[0]
 
     def get(self, key):
-        return self._request(protocol.GET, key)[0]
+        return self._request(protocol.cmd.GET, key)[0]
 
     def exists(self, key):
-        return self._request(protocol.EXISTS, key)[0]
+        return self._request(protocol.cmd.EXISTS, key)[0]
 
     def get_default(self, key, default=None):
         try:
-            return self._request(protocol.GET, key)[0]
-        except protocol.KeyNotFound:
+            return self._request(protocol.cmd.GET, key)[0]
+        except protocol.status.KeyNotFound:
             return default
 
     def put(self, key, value):
-        self._request(protocol.PUT, key, value)
+        self._request(protocol.cmd.PUT, key, value)
 
     def delete(self, key):
-        self._request(protocol.DELETE, key)
+        self._request(protocol.cmd.DELETE, key)
 
     def range(self,
               prefix=None, start=None, stop=None,
               include_start=True, include_stop=False,
               include_key=True, include_value=True,
               reverse=False):
-        return self._request_multi(protocol.RANGE,
+        return self._request_multi(protocol.cmd.RANGE,
                                    prefix, start, stop,
                                    include_start, include_stop,
                                    include_key, include_value,

@@ -2,7 +2,7 @@ from threading import Thread
 
 import zmq
 
-import protocol
+from . import protocol
 
 
 class Multipart(list):
@@ -21,22 +21,22 @@ class Worker(Thread):
         self.databases = databases
 
         self.db_commands = {
-            protocol.CREATE: self.create,
-            protocol.CONNECT: self.connect
+            protocol.cmd.CREATE: self.create,
+            protocol.cmd.CONNECT: self.connect
         }
 
         self.commands = {
-            protocol.GET: self.get,
-            protocol.EXISTS: self.exists,
-            protocol.PUT: self.put,
-            protocol.DELETE: self.delete,
-            protocol.RANGE: self.range,
-            protocol.BATCH: self.batch
+            protocol.cmd.GET: self.get,
+            protocol.cmd.EXISTS: self.exists,
+            protocol.cmd.PUT: self.put,
+            protocol.cmd.DELETE: self.delete,
+            protocol.cmd.RANGE: self.range,
+            protocol.cmd.BATCH: self.batch
         }
 
         self.batch_commands = {
-            protocol.PUT: self.put,
-            protocol.DELETE: self.delete
+            protocol.cmd.PUT: self.put,
+            protocol.cmd.DELETE: self.delete
         }
 
     def run(self):
@@ -44,15 +44,15 @@ class Worker(Thread):
         self.socket.connect(self.uri)
 
         while True:
-            cmd, uid, args = protocol.extract_request(self.socket.recv())
+            cmd, uid, args = protocol.msg.extract_request(self.socket.recv())
             try:
                 if cmd in self.db_commands:
                     db = None
                 else:
                     db = self.databases.get(uid)
             except:
-                resp = protocol.format_response(
-                    uid, status=protocol.STATUS_NO_DB)
+                resp = protocol.msg.format_response(
+                    uid, status=protocol.status.NO_DB)
             else:
                 if db:
                     resp = self.handle_cmd(db, self.commands, cmd, args)
@@ -70,12 +70,12 @@ class Worker(Thread):
                 resp = cb(db, *args) if db is not None else cb(*args)
             except TypeError:
                 print("invalid args")
-                resp = protocol.format_response(
-                    cmd, status=protocol.STATUS_INVALID_ARGS)
+                resp = protocol.msg.format_response(
+                    cmd, status=protocol.status.INVALID_ARGS)
         else:
             print("bad command")
-            resp = protocol.format_response(
-                cmd, status=protocol.STATUS_CMD_NOT_FOUND)
+            resp = protocol.msg.format_response(
+                cmd, status=protocol.status.CMD_NOT_FOUND)
         return resp
 
     def create(self, name):
@@ -85,42 +85,42 @@ class Worker(Thread):
         name = name.decode()
         try:
             uid = self.databases.connect(name, create)
-            resp = protocol.format_response(uid, status=protocol.STATUS_OK)
+            resp = protocol.msg.format_response(uid, status=protocol.status.OK)
         except self.databases.NotExistError as e:
             print('database does not exist:', e)
-            resp = protocol.format_response(
-                name, status=protocol.STATUS_DB_NOT_FOUND)
+            resp = protocol.msg.format_response(
+                name, status=protocol.status.DB_NOT_FOUND)
         except Exception as e:
             print('database error:', e)
-            resp = protocol.format_response(
-                name, status=protocol.STATUS_DB_ERROR)
+            resp = protocol.msg.format_response(
+                name, status=protocol.status.DB_ERROR)
         return resp
 
     def get(self, db, key):
         value = db.get(key)
         if value is None:
-            return protocol.format_response(
-                key, status=protocol.STATUS_KEY_NOT_FOUND)
-        return protocol.format_response(value)
+            return protocol.msg.format_response(
+                key, status=protocol.status.KEY_NOT_FOUND)
+        return protocol.msg.format_response(value)
 
     def exists(self, db, key):
         value = db.get(key)
-        return protocol.format_response(value is not None)
+        return protocol.msg.format_response(value is not None)
 
     def put(self, db, key, value):
         db.put(key, value)
-        return protocol.format_response()
+        return protocol.msg.format_response()
 
     def delete(self, db, key):
         db.delete(key)
-        return protocol.format_response()
+        return protocol.msg.format_response()
 
     def range(self, db,
               prefix, start, stop,
               include_start, include_stop,
               include_key, include_value,
               reverse):
-        values = Multipart(protocol.pack_arg(v) for v in
+        values = Multipart(protocol.msg.pack_arg(v) for v in
                            db.iterator(prefix=prefix,
                                        start=start,
                                        stop=stop,
@@ -129,12 +129,12 @@ class Worker(Thread):
                                        include_key=include_key,
                                        include_value=include_value,
                                        reverse=reverse))
-        values.insert(0, protocol.format_response())
+        values.insert(0, protocol.msg.format_response())
         return values
 
     def batch(self, db, transaction):
         with db.write_batch(transaction=transaction) as wb:
             while self.socket.get(zmq.RCVMORE):
-                cmd, _, args = protocol.extract_request(self.socket.recv())
+                cmd, _, args = protocol.msg.extract_request(self.socket.recv())
                 self.handle_cmd(wb, self.batch_commands, cmd, args)
-        return protocol.format_response()
+        return protocol.msg.format_response()

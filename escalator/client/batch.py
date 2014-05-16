@@ -1,4 +1,4 @@
-import protocol
+from . import protocol
 
 
 class WriteBatch(object):
@@ -8,11 +8,11 @@ class WriteBatch(object):
         self.requests = []
 
     def write(self):
-        self.requests.insert(0, protocol.format_request(protocol.BATCH,
-                                                        self.db.db_uid,
-                                                        self.transaction))
+        self.requests.insert(0, protocol.msg.format_request(protocol.cmd.BATCH,
+                                                            self.db.db_uid,
+                                                            self.transaction))
         self.db.socket.send_multipart(self.requests)
-        protocol.extract_response(self.db.socket.recv())
+        protocol.msg.extract_response(self.db.socket.recv())
         self.requests = []
 
     def __enter__(self):
@@ -23,10 +23,10 @@ class WriteBatch(object):
             self.write()
 
     def _request(self, cmd, *args):
-        self.requests.append(protocol.format_request(cmd, None, *args))
+        self.requests.append(protocol.msg.format_request(cmd, None, *args))
 
     def put(self, key, value):
-        self._request(protocol.PUT, key, value)
+        self._request(protocol.cmd.PUT, key, value)
 
     def delete(self, key):
-        self._request(protocol.DELETE, key)
+        self._request(protocol.cmd.DELETE, key)
