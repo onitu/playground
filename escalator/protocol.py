@@ -58,8 +58,9 @@ STATUS_DB_ERROR = new_status('STATUS_DB_ERROR', DatabaseError)
 
 
 class NoDatabaseSelected(ValueError):
-    def __init__(self, cmd):
-        ValueError.__init__(self, 'No database is selected')
+    def __init__(self, uid):
+        ValueError.__init__(self, 'No database is selected (received uid {})'.
+                            format(uid))
 STATUS_NO_DB = new_status('STATUS_NO_DB', NoDatabaseSelected)
 
 

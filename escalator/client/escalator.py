@@ -32,6 +32,12 @@ class Escalator(object):
                 l.append(protocol.unpack_msg(self.socket.recv()))
             return l
 
+    def create(self, name):
+        self._request(protocol.CREATE, name)
+
+    def connect(self, name, create=False):
+        self.db_uid = self._request(protocol.CONNECT, name, create)[0]
+
     def get(self, key):
         return self._request(protocol.GET, key)[0]
 

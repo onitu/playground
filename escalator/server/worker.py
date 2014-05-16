@@ -11,14 +11,19 @@ class Multipart(list):
 
 class Worker(Thread):
 
-    def __init__(self, db, uri, *args, **kwargs):
+    def __init__(self, databases, uri, *args, **kwargs):
         super(Worker, self).__init__(*args, **kwargs)
 
         self.context = zmq.Context.instance()
         self.uri = uri
         self.socket = None
 
-        self.db = db
+        self.databases = databases
+
+        self.db_commands = {
+            protocol.CREATE: self.create,
+            protocol.CONNECT: self.connect
+        }
 
         self.commands = {
             protocol.GET: self.get,
@@ -40,17 +45,29 @@ class Worker(Thread):
 
         while True:
             cmd, uid, args = protocol.extract_request(self.socket.recv())
-            resp = self.handle_cmd(self.commands, cmd, args)
+            try:
+                if cmd in self.db_commands:
+                    db = None
+                else:
+                    db = self.databases.get(uid)
+            except:
+                resp = protocol.format_response(
+                    uid, status=protocol.STATUS_NO_DB)
+            else:
+                if db:
+                    resp = self.handle_cmd(db, self.commands, cmd, args)
+                else:
+                    resp = self.handle_cmd(None, self.db_commands, cmd, args)
             if isinstance(resp, Multipart):
                 self.socket.send_multipart(resp)
             else:
                 self.socket.send(resp)
 
-    def handle_cmd(self, commands, cmd, args):
+    def handle_cmd(self, db, commands, cmd, args):
         cb = commands.get(cmd)
         if cb:
             try:
-                resp = cb(*args)
+                resp = cb(db, *args) if db is not None else cb(*args)
             except TypeError:
                 print("invalid args")
                 resp = protocol.format_response(
@@ -61,26 +78,44 @@ class Worker(Thread):
                 cmd, status=protocol.STATUS_CMD_NOT_FOUND)
         return resp
 
-    def get(self, key):
-        value = self.db.get(key)
+    def create(self, name):
+        return self.connect(name, True)
+
+    def connect(self, name, create):
+        name = name.decode()
+        try:
+            uid = self.databases.connect(name, create)
+            resp = protocol.format_response(uid, status=protocol.STATUS_OK)
+        except self.databases.NotExistError as e:
+            print('database does not exist:', e)
+            resp = protocol.format_response(
+                name, status=protocol.STATUS_DB_NOT_FOUND)
+        except Exception as e:
+            print('database error:', e)
+            resp = protocol.format_response(
+                name, status=protocol.STATUS_DB_ERROR)
+        return resp
+
+    def get(self, db, key):
+        value = db.get(key)
         if value is None:
             return protocol.format_response(
                 key, status=protocol.STATUS_KEY_NOT_FOUND)
         return protocol.format_response(value)
 
-    def exists(self, key):
-        value = self.db.get(key)
+    def exists(self, db, key):
+        value = db.get(key)
         return protocol.format_response(value is not None)
 
-    def put(self, key, value):
-        self.db.put(key, value)
+    def put(self, db, key, value):
+        db.put(key, value)
         return protocol.format_response()
 
-    def delete(self, key):
-        self.db.delete(key)
+    def delete(self, db, key):
+        db.delete(key)
         return protocol.format_response()
 
-    def range(self,
+    def range(self, db,
               prefix, start, stop,
               include_start, include_stop,
               include_key, include_value,
@@ -97,12 +132,11 @@ class Worker(Thread):
         values.insert(0, protocol.format_response())
         return values
 
-    def batch(self, transaction):
+    def batch(self, db, transaction):
         with self.db.write_batch(transaction=transaction) as wb:
             while self.socket.get(zmq.RCVMORE):
                 cmd, _, args = protocol.extract_request(self.socket.recv())
-                args.insert(0, wb)
-                self.handle_cmd(self.batch_commands, cmd, args)
+                self.handle_cmd(wb, self.batch_commands, cmd, args)
         return protocol.format_response()
 
     def batch_put(self, wb, key, value):

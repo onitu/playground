@@ -1,6 +1,6 @@
 import zmq
-import plyvel
 
+from .databases import Databases
 from .worker import Worker
 
 context = zmq.Context()
@@ -14,13 +14,13 @@ proxy.bind_out('tcp://*:4224')
 proxy.bind_in(back_uri)
 proxy.start()
 
-db = plyvel.DB('dbs/default', create_if_missing=True)
+databases = Databases('dbs')
 
 nb_workers = 8
 workers = []
 
 for i in range(nb_workers):
-    worker = Worker(db, back_uri)
+    worker = Worker(databases, back_uri)
     worker.start()
     workers.append(worker)
 
