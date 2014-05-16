@@ -7,8 +7,9 @@ from .batch import WriteBatch
 
 
 class Escalator(object):
-    def __init__(self, server='localhost', port=4224, protocol='tcp',
-                 addr=None):
+    def __init__(self, db_name='default',
+                 server='localhost', port=4224, protocol='tcp', addr=None,
+                 create_db=False):
         super(Escalator, self).__init__()
         self.db_uid = None
         self.context = zmq.Context()
@@ -17,6 +18,8 @@ class Escalator(object):
         if addr is None:
             addr = '{}://{}:{}'.format(protocol, server, port)
         self.socket.connect(addr)
+        if db_name is not None:
+            self.connect(db_name, create_db)
 
     def _request(self, cmd, *args):
         with self.lock:
