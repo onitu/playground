@@ -25,7 +25,9 @@ class WriteBatch(object):
     def _request(self, cmd, *args):
         self.requests.append(protocol.msg.format_request(cmd, None, *args))
 
-    def put(self, key, value):
+    def put(self, key, value, pack=True):
+        if pack:
+            value = protocol.msg.pack_arg(value)
         self._request(protocol.cmd.PUT, key, value)
 
     def delete(self, key):

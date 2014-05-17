@@ -45,19 +45,24 @@ class Escalator(object):
     def connect(self, name, create=False):
         self.db_uid = self._request(protocol.cmd.CONNECT, name, create)[0]
 
-    def get(self, key):
-        return self._request(protocol.cmd.GET, key)[0]
+    def get(self, key, pack=True):
+        value = self._request(protocol.cmd.GET, key)[0]
+        if pack:
+            value = protocol.msg.unpack_msg(value)
+        return value
 
     def exists(self, key):
         return self._request(protocol.cmd.EXISTS, key)[0]
 
-    def get_default(self, key, default=None):
+    def get_default(self, key, default=None, pack=True):
         try:
-            return self._request(protocol.cmd.GET, key)[0]
+            return self.get(key, pack=pack)
         except protocol.status.KeyNotFound:
             return default
 
-    def put(self, key, value):
+    def put(self, key, value, pack=True):
+        if pack:
+            value = protocol.msg.pack_arg(value)
         self._request(protocol.cmd.PUT, key, value)
 
     def delete(self, key):
@@ -67,12 +72,19 @@ class Escalator(object):
               prefix=None, start=None, stop=None,
               include_start=True, include_stop=False,
               include_key=True, include_value=True,
-              reverse=False):
-        return self._request_multi(protocol.cmd.RANGE,
-                                   prefix, start, stop,
-                                   include_start, include_stop,
-                                   include_key, include_value,
-                                   reverse)
+              reverse=False, pack=True):
+        values = self._request_multi(protocol.cmd.RANGE,
+                                     prefix, start, stop,
+                                     include_start, include_stop,
+                                     include_key, include_value,
+                                     reverse)
+        if pack and include_value:
+            if include_key:
+                values = [[key, protocol.msg.unpack_msg(value)]
+                          for key, value in values]
+            else:
+                values = [protocol.msg.unpack_msg(value) for value in values]
+        return values
 
     def write_batch(self, transaction=False):
         return WriteBatch(self, transaction)
